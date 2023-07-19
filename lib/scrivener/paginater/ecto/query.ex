@@ -19,8 +19,12 @@ defimpl Scrivener.Paginater, for: Ecto.Query do
       end)
 
     total_pages = total_pages(total_entries, page_size, page_number)
-    allow_overflow_page_number = Keyword.get(options, :allow_overflow_page_number, total_entries == -1)
+
+    allow_overflow_page_number =
+      Keyword.get(options, :allow_overflow_page_number, total_entries == -1)
+
     page_number = calc_pages(allow_overflow_page_number, total_pages, page_number)
+
     %Page{
       page_size: page_size,
       page_number: page_number,
@@ -33,21 +37,25 @@ defimpl Scrivener.Paginater, for: Ecto.Query do
   defp calc_pages(true = _overflow, _total_pages, page_number), do: page_number
   defp calc_pages(_no_overflow, total_pages, page_number), do: min(total_pages, page_number)
 
-  defp entries(_, _, page_number, total_pages, _, _, _) when page_number > total_pages and total_pages != -1, do: []
+  defp entries(_, _, page_number, total_pages, _, _, _)
+       when page_number > total_pages and total_pages != -1,
+       do: []
 
   defp entries(query, repo, page_number, _, page_size, caller, options) do
     offset = Keyword.get_lazy(options, :offset, fn -> page_size * (page_number - 1) end)
     prefix = options[:prefix]
+    async = options[:stream] || false
 
     query
     |> offset(^offset)
     |> limit(^page_size)
-    |> all(repo, caller, prefix)
+    |> all(repo, caller, async, prefix)
   end
 
   defp total_entries(query, repo, caller, options) do
     prefix = options[:prefix]
     disable_count = options[:disable_count] || false
+
     query =
       query
       |> exclude(:preload)
@@ -61,7 +69,8 @@ defimpl Scrivener.Paginater, for: Ecto.Query do
     end
   end
 
-  defp aggregate(%{distinct: %{expr: expr}} = query, disable_count) when expr == true or is_list(expr) do
+  defp aggregate(%{distinct: %{expr: expr}} = query, disable_count)
+       when expr == true or is_list(expr) do
     query
     |> exclude(:select)
     |> count(disable_count)
@@ -113,11 +122,19 @@ defimpl Scrivener.Paginater, for: Ecto.Query do
     (total_entries / page_size) |> Float.ceil() |> round
   end
 
-  defp all(query, repo, caller, nil) do
+  defp all(query, repo, caller, true, nil) do
+    repo.all(query, caller: caller, timeout: :infinity)
+  end
+
+  defp all(query, repo, caller, true, prefix) do
+    repo.all(query, caller: caller, prefix: prefix, timeout: :infinity)
+  end
+
+  defp all(query, repo, caller, false, nil) do
     repo.all(query, caller: caller)
   end
 
-  defp all(query, repo, caller, prefix) do
+  defp all(query, repo, caller, false, prefix) do
     repo.all(query, caller: caller, prefix: prefix)
   end
 
